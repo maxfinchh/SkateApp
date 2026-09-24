@@ -4,6 +4,7 @@ using UnityEngine;
 [RequireComponent(typeof(CharacterController))]
 public sealed class PlayerController : MonoBehaviour
 {
+    private static readonly int IsPushingParameter = Animator.StringToHash("IsPushing");
     private const float GrindRideHeightOffset = 0.5f;
     private const float KickerRideHeightOffset = 0.04f;
 
@@ -11,6 +12,7 @@ public sealed class PlayerController : MonoBehaviour
     [SerializeField] private SkateRunnerGameManager gameManager;
     [SerializeField] private Transform trickRoot;
     [SerializeField] private Transform boardVisual;
+    [SerializeField] private Animator skaterAnimator;
     [SerializeField] private float laneWidth = 2.2f;
     [SerializeField] private float laneLerp = 14f;
     [SerializeField] private float roadHalfWidth = 3.05f;
@@ -50,6 +52,7 @@ public sealed class PlayerController : MonoBehaviour
     [SerializeField] private float negativePickupCooldownSeconds = 0.75f;
 
     private CharacterController controller;
+    private bool hasPushAnimationParameter;
     private int lane;
     private int previousLane;
     private float steerTargetX;
@@ -108,6 +111,25 @@ public sealed class PlayerController : MonoBehaviour
         controller = GetComponent<CharacterController>();
         baseForwardSpeed = forwardSpeed;
 
+        if (skaterAnimator == null)
+        {
+            skaterAnimator = GetComponentInChildren<Animator>();
+        }
+
+        if (skaterAnimator != null && skaterAnimator.runtimeAnimatorController != null)
+        {
+            // The CharacterController owns travel; the Animator only poses the rider.
+            skaterAnimator.applyRootMotion = false;
+            foreach (AnimatorControllerParameter parameter in skaterAnimator.parameters)
+            {
+                if (parameter.nameHash == IsPushingParameter && parameter.type == AnimatorControllerParameterType.Bool)
+                {
+                    hasPushAnimationParameter = true;
+                    break;
+                }
+            }
+        }
+
         if (gestureInput == null)
         {
             gestureInput = FindFirstObjectByType<GestureInput>();
@@ -135,6 +157,11 @@ public sealed class PlayerController : MonoBehaviour
 
     private void OnDisable()
     {
+        if (hasPushAnimationParameter && skaterAnimator != null)
+        {
+            skaterAnimator.SetBool(IsPushingParameter, false);
+        }
+
         if (gestureInput == null)
         {
             return;
@@ -1474,6 +1501,13 @@ public sealed class PlayerController : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (hasPushAnimationParameter && skaterAnimator != null)
+        {
+            bool animatePush = running && pushing && controller.isGrounded
+                && !flipping && !grinding && !manualing && !finalBonusActive;
+            skaterAnimator.SetBool(IsPushingParameter, animatePush);
+        }
+
         if (featureTrickTimer <= 0f)
         {
             return;
