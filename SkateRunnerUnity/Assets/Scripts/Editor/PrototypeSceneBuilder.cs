@@ -1,5 +1,6 @@
 #if UNITY_EDITOR
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
@@ -20,11 +21,31 @@ public static class PrototypeSceneBuilder
         Material obstacle = CreateMaterial("Obstacle", new Color(0.95f, 0.72f, 0.1f));
         Material rail = CreateMaterial("Rail", new Color(0.66f, 0.72f, 0.78f));
         Material coin = CreateMaterial("Coin", new Color(1f, 0.76f, 0.1f));
+        Material ramp = CreateMaterial("Final Ramp", new Color(0.05f, 0.45f, 0.95f));
+        Material marker = CreateMaterial("Bonus Marker", new Color(0.2f, 1f, 0.65f));
+        Material feature = CreateMaterial("Feature Ramp", new Color(0.18f, 0.72f, 1f));
+        Material stair = CreateMaterial("Stair Concrete", new Color(0.48f, 0.5f, 0.54f));
+        Material hazard = CreateMaterial("Wet Concrete Hazard", new Color(0.32f, 0.9f, 0.88f));
 
         GameObject systems = new GameObject("Systems");
         GestureInput gestureInput = systems.AddComponent<GestureInput>();
+        MissionTracker missionTracker = systems.AddComponent<MissionTracker>();
+        PlayerUpgrades upgrades = systems.AddComponent<PlayerUpgrades>();
+        ChaserPressure chaser = systems.AddComponent<ChaserPressure>();
         SkateRunnerGameManager manager = systems.AddComponent<SkateRunnerGameManager>();
+        HUDController hud = systems.AddComponent<HUDController>();
         ObstacleSpawner spawner = systems.AddComponent<ObstacleSpawner>();
+
+        SerializedObject gestureSo = new SerializedObject(gestureInput);
+        gestureSo.FindProperty("minSwipePixels").floatValue = 60f;
+        gestureSo.FindProperty("holdSeconds").floatValue = 0.18f;
+        gestureSo.FindProperty("diagonalBias").floatValue = 0.45f;
+        gestureSo.ApplyModifiedPropertiesWithoutUndo();
+
+        SerializedObject chaserSo = new SerializedObject(chaser);
+        chaserSo.FindProperty("mistakeWindowSeconds").floatValue = 15f;
+        chaserSo.FindProperty("mistakesToFail").intValue = 2;
+        chaserSo.ApplyModifiedPropertiesWithoutUndo();
 
         GameObject player = new GameObject("Skater Player");
         CharacterController controller = player.AddComponent<CharacterController>();
@@ -58,18 +79,45 @@ public static class PrototypeSceneBuilder
         playerSo.FindProperty("gameManager").objectReferenceValue = manager;
         playerSo.FindProperty("trickRoot").objectReferenceValue = trickRoot.transform;
         playerSo.FindProperty("boardVisual").objectReferenceValue = boardVisual.transform;
+        playerSo.FindProperty("finalBonusSpeedMultiplier").floatValue = 1.35f;
+        playerSo.FindProperty("finalLaunchVelocity").floatValue = 36f;
+        playerSo.FindProperty("finalTrickBoost").floatValue = 2.8f;
+        playerSo.FindProperty("finalTrickForwardBoost").floatValue = 0.75f;
+        playerSo.FindProperty("finalTrickCooldownSeconds").floatValue = 0.12f;
+        playerSo.FindProperty("minimumFinalAirSeconds").floatValue = 3f;
+        playerSo.FindProperty("queuedGrindSeconds").floatValue = 0.45f;
+        playerSo.FindProperty("railBumpCooldownSeconds").floatValue = 0.85f;
+        playerSo.FindProperty("railTrickApproachDistance").floatValue = 17f;
+        playerSo.FindProperty("railTrickBehindDistance").floatValue = 5f;
+        playerSo.FindProperty("manualPadMinEntryVelocity").floatValue = 1.2f;
+        playerSo.FindProperty("manualMissCooldownSeconds").floatValue = 15f;
+        playerSo.FindProperty("negativePickupCooldownSeconds").floatValue = 0.75f;
         playerSo.ApplyModifiedPropertiesWithoutUndo();
 
         SerializedObject managerSo = new SerializedObject(manager);
         managerSo.FindProperty("player").objectReferenceValue = playerController;
         managerSo.FindProperty("spawner").objectReferenceValue = spawner;
+        managerSo.FindProperty("missionTracker").objectReferenceValue = missionTracker;
+        managerSo.FindProperty("upgrades").objectReferenceValue = upgrades;
+        managerSo.FindProperty("chaser").objectReferenceValue = chaser;
+        managerSo.FindProperty("finalBonusTimeoutSeconds").floatValue = 30f;
+        managerSo.FindProperty("gameOverRestartDelay").floatValue = 1.35f;
         managerSo.ApplyModifiedPropertiesWithoutUndo();
+
+        SerializedObject hudSo = new SerializedObject(hud);
+        hudSo.FindProperty("gameManager").objectReferenceValue = manager;
+        hudSo.ApplyModifiedPropertiesWithoutUndo();
 
         SerializedObject spawnerSo = new SerializedObject(spawner);
         spawnerSo.FindProperty("player").objectReferenceValue = player.transform;
         spawnerSo.FindProperty("obstacleMaterial").objectReferenceValue = obstacle;
         spawnerSo.FindProperty("railMaterial").objectReferenceValue = rail;
         spawnerSo.FindProperty("coinMaterial").objectReferenceValue = coin;
+        spawnerSo.FindProperty("rampMaterial").objectReferenceValue = ramp;
+        spawnerSo.FindProperty("markerMaterial").objectReferenceValue = marker;
+        spawnerSo.FindProperty("featureMaterial").objectReferenceValue = feature;
+        spawnerSo.FindProperty("stairMaterial").objectReferenceValue = stair;
+        spawnerSo.FindProperty("hazardMaterial").objectReferenceValue = hazard;
         spawnerSo.ApplyModifiedPropertiesWithoutUndo();
 
         CreateGround(asphalt, lanePaint);
@@ -84,22 +132,55 @@ public static class PrototypeSceneBuilder
         Debug.Log("Skate Runner prototype scene built at Assets/Scenes/Prototype.unity");
     }
 
+    [MenuItem("Skate Runner/Configure iOS Prototype Settings")]
+    public static void ConfigureIosPrototypeSettings()
+    {
+        PlayerSettings.defaultInterfaceOrientation = UIOrientation.Portrait;
+        PlayerSettings.applicationIdentifier = "com.maxfinch.skaterunner";
+        EditorBuildSettings.scenes = new[]
+        {
+            new EditorBuildSettingsScene("Assets/Scenes/Prototype.unity", true)
+        };
+
+        BuildTarget target = BuildTarget.iOS;
+        BuildTargetGroup group = BuildTargetGroup.iOS;
+        EditorUserBuildSettings.SwitchActiveBuildTarget(group, target);
+        Debug.Log("Skate Runner iOS settings configured. Use Build Profiles/File > Build to create the Xcode project.");
+    }
+
     private static void CreateGround(Material asphalt, Material lanePaint)
     {
-        GameObject road = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        road.name = "Road";
-        road.transform.position = new Vector3(0f, -0.08f, 70f);
-        road.transform.localScale = new Vector3(8f, 0.1f, 180f);
-        road.GetComponent<Renderer>().sharedMaterial = asphalt;
+        const float segmentLength = 48f;
+        const int segmentCount = 6;
 
-        for (int lane = -1; lane <= 1; lane++)
+        for (int segment = 0; segment < segmentCount; segment++)
         {
-            GameObject stripe = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            stripe.name = $"Lane Center {lane}";
-            stripe.transform.position = new Vector3(lane * 2.2f, 0.01f, 70f);
-            stripe.transform.localScale = new Vector3(0.06f, 0.04f, 180f);
-            stripe.GetComponent<Renderer>().sharedMaterial = lanePaint;
-            Object.DestroyImmediate(stripe.GetComponent<Collider>());
+            GameObject root = new GameObject($"Road Segment {segment + 1}");
+            root.transform.position = new Vector3(0f, 0f, segment * segmentLength + segmentLength * 0.5f);
+
+            RoadSegmentLooper looper = root.AddComponent<RoadSegmentLooper>();
+            SerializedObject looperSo = new SerializedObject(looper);
+            looperSo.FindProperty("segmentLength").floatValue = segmentLength;
+            looperSo.FindProperty("segmentCount").intValue = segmentCount;
+            looperSo.ApplyModifiedPropertiesWithoutUndo();
+
+            GameObject road = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            road.name = "Road";
+            road.transform.SetParent(root.transform);
+            road.transform.localPosition = new Vector3(0f, -0.08f, 0f);
+            road.transform.localScale = new Vector3(8f, 0.1f, segmentLength);
+            road.GetComponent<Renderer>().sharedMaterial = asphalt;
+
+            for (int lane = -1; lane <= 1; lane++)
+            {
+                GameObject stripe = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                stripe.name = $"Lane Center {lane}";
+                stripe.transform.SetParent(root.transform);
+                stripe.transform.localPosition = new Vector3(lane * 2.2f, 0.01f, 0f);
+                stripe.transform.localScale = new Vector3(0.06f, 0.04f, segmentLength);
+                stripe.GetComponent<Renderer>().sharedMaterial = lanePaint;
+                Object.DestroyImmediate(stripe.GetComponent<Collider>());
+            }
         }
     }
 

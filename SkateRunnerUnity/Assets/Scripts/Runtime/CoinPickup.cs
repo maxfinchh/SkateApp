@@ -16,6 +16,13 @@ public sealed class CoinPickup : MonoBehaviour
             gameManager.AddCoins(value);
         }
 
-        Destroy(gameObject);
+        if (TryGetComponent(out PooledObject pooledObject))
+        {
+            pooledObject.Release();
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
     }
 }
