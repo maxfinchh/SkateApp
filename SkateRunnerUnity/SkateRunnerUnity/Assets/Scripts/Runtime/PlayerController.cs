@@ -4,6 +4,9 @@ using UnityEngine;
 [RequireComponent(typeof(CharacterController))]
 public sealed class PlayerController : MonoBehaviour
 {
+    private const float GrindRideHeightOffset = 0.5f;
+    private const float KickerRideHeightOffset = 0.04f;
+
     [SerializeField] private GestureInput gestureInput;
     [SerializeField] private SkateRunnerGameManager gameManager;
     [SerializeField] private Transform trickRoot;
@@ -33,13 +36,16 @@ public sealed class PlayerController : MonoBehaviour
     [SerializeField] private float minimumFinalAirSeconds = 3f;
     [SerializeField] private float queuedGrindSeconds = 1.15f;
     [SerializeField] private float grindFlickBufferSeconds = 0.55f;
-    [SerializeField] private float railBumpGraceSeconds = 0.22f;
+    [SerializeField] private float railEntryTriggerGraceSeconds = 0.12f;
     [SerializeField] private float railBumpCooldownSeconds = 0.85f;
     [SerializeField] private float railTrickApproachDistance = 17f;
     [SerializeField] private float railTrickBehindDistance = 5f;
-    [SerializeField] private float railSideReach = 3.8f;
-    [SerializeField] private float manualEntryGraceSeconds = 0.9f;
+    [SerializeField] private float railHeadOnMaxOffset = 0.78f;
+    [SerializeField] private float manualHeadOnSideMargin = 0.45f;
+    [SerializeField] private float manualTrickEntryWindowSeconds = 1.0f;
     [SerializeField] private float manualPadSeconds = 1.45f;
+    [SerializeField] private float manualPadMinEntryVelocity = 1.2f;
+    [SerializeField] private int manualTrickEntryBonusPoints = 120;
     [SerializeField] private float manualMissCooldownSeconds = 15f;
     [SerializeField] private float negativePickupCooldownSeconds = 0.75f;
 
@@ -55,6 +61,7 @@ public sealed class PlayerController : MonoBehaviour
     private bool flipping;
     private bool grinding;
     private bool manualing;
+    private float manualBalance;
     private float flipTimer;
     private float grindTimer;
     private float manualTimer;
@@ -77,10 +84,14 @@ public sealed class PlayerController : MonoBehaviour
     private float queuedGrindUntil;
     private SwipeDirection queuedGrindDirection = SwipeDirection.UpRight;
     private bool queuedGrindTrickAlreadyPerformed;
-    private GrindRail pendingBumpRail;
-    private float pendingRailBumpTime;
     private float railBumpCooldownUntil;
-    private float lastManualEntryInputTime;
+    private GrindRail pendingRailContact;
+    private float pendingRailContactUntil;
+    private GrindRail railEntryTarget;
+    private float railEntryUntil;
+    private RailEntryKicker activeRailKicker;
+    private float manualTrickEntryUntil;
+    private string manualEntryTrickName;
     private float manualMissCooldownUntil;
     private float negativePickupCooldownUntil;
 
@@ -89,6 +100,8 @@ public sealed class PlayerController : MonoBehaviour
     public float CurrentFinalBonusPower => finalLaunchStarted
         ? Mathf.Clamp01((verticalVelocity + finalLaunchVelocity * 0.2f) / (finalLaunchVelocity * 1.2f))
         : 0f;
+    public bool IsManualing => manualing;
+    public float ManualBalance => manualBalance;
 
     private void Awake()
     {
@@ -115,7 +128,6 @@ public sealed class PlayerController : MonoBehaviour
 
         gestureInput.Swipe += OnSwipe;
         gestureInput.SwipeHoldStarted += OnSwipeHoldStarted;
-        gestureInput.SwipeHoldReleased += OnSwipeHoldReleased;
         gestureInput.LaneTargetChanged += OnLaneTargetChanged;
         gestureInput.SteerTargetChanged += OnSteerTargetChanged;
         gestureInput.PushChanged += OnPushChanged;
@@ -130,7 +142,6 @@ public sealed class PlayerController : MonoBehaviour
 
         gestureInput.Swipe -= OnSwipe;
         gestureInput.SwipeHoldStarted -= OnSwipeHoldStarted;
-        gestureInput.SwipeHoldReleased -= OnSwipeHoldReleased;
         gestureInput.LaneTargetChanged -= OnLaneTargetChanged;
         gestureInput.SteerTargetChanged -= OnSteerTargetChanged;
         gestureInput.PushChanged -= OnPushChanged;
@@ -195,13 +206,16 @@ public sealed class PlayerController : MonoBehaviour
         }
 
         controller.Move(new Vector3(xDelta, verticalVelocity * Time.deltaTime, (forwardSpeed - backwardVelocity) * Time.deltaTime));
+        UpdateRailKickerRide();
+        UpdateGrindRide();
+
         backwardVelocity = Mathf.MoveTowards(backwardVelocity, 0f, shoveRecovery * Time.deltaTime);
         sideVelocity = Mathf.MoveTowards(sideVelocity, 0f, shoveRecovery * Time.deltaTime);
         UpdateFinalBonus();
         UpdateManual();
         UpdateFlipVisual();
         HandleKeyboardDebugInput();
-        ProcessPendingRailBump();
+        ResolvePendingRailContact();
     }
 
     public void ResetRun()
@@ -217,6 +231,7 @@ public sealed class PlayerController : MonoBehaviour
         flipping = false;
         grinding = false;
         manualing = false;
+        manualBalance = 0.5f;
         hasFailed = false;
         finalBonusActive = false;
         finalLaunchStarted = false;
@@ -232,10 +247,14 @@ public sealed class PlayerController : MonoBehaviour
         queuedGrindUntil = 0f;
         queuedGrindDirection = SwipeDirection.UpRight;
         queuedGrindTrickAlreadyPerformed = false;
-        pendingBumpRail = null;
-        pendingRailBumpTime = 0f;
         railBumpCooldownUntil = 0f;
-        lastManualEntryInputTime = -999f;
+        pendingRailContact = null;
+        pendingRailContactUntil = 0f;
+        railEntryTarget = null;
+        railEntryUntil = 0f;
+        activeRailKicker = null;
+        manualTrickEntryUntil = 0f;
+        manualEntryTrickName = null;
         manualMissCooldownUntil = 0f;
         negativePickupCooldownUntil = 0f;
         pendingFeatureTrick = null;
@@ -271,11 +290,19 @@ public sealed class PlayerController : MonoBehaviour
         pushing = false;
         grinding = false;
         manualing = false;
+        manualBalance = 0.5f;
         flipping = false;
         currentRail = null;
         queuedGrindUntil = 0f;
         queuedGrindDirection = SwipeDirection.UpRight;
         queuedGrindTrickAlreadyPerformed = false;
+        railEntryTarget = null;
+        railEntryUntil = 0f;
+        activeRailKicker = null;
+        pendingRailContact = null;
+        pendingRailContactUntil = 0f;
+        manualTrickEntryUntil = 0f;
+        manualEntryTrickName = null;
         transform.position = new Vector3(0f, transform.position.y, transform.position.z);
         transform.rotation = Quaternion.identity;
 
@@ -311,6 +338,12 @@ public sealed class PlayerController : MonoBehaviour
         lane = 0;
         grinding = false;
         currentRail = null;
+        nearbyRail = null;
+        railEntryTarget = null;
+        railEntryUntil = 0f;
+        activeRailKicker = null;
+        pendingRailContact = null;
+        pendingRailContactUntil = 0f;
         flipping = true;
         flipTimer = 0f;
         forwardSpeed = baseForwardSpeed * finalBonusSpeedMultiplier;
@@ -362,7 +395,7 @@ public sealed class PlayerController : MonoBehaviour
         else if (direction == SwipeDirection.Up)
         {
             Jump();
-            MarkManualEntryInput();
+            ArmManualTrickEntry("Ollie");
             gameManager.AddTrickScore("Ollie", 75);
         }
         else if (IsDiagonal(direction))
@@ -402,32 +435,25 @@ public sealed class PlayerController : MonoBehaviour
 
         if (gestureInput != null && gestureInput.Scheme == ControlScheme.PushAndFlick)
         {
-            if (!IsDiagonal(direction))
-            {
-                return;
-            }
-
-            GrindRail targetRail = nearbyRail != null ? nearbyRail : FindTargetRail(direction);
-            if (targetRail != null)
-            {
-                TrickOntoRail(targetRail, direction);
-            }
-            else
-            {
-                BufferGrindInput(direction, queuedGrindSeconds, false);
-            }
-
             return;
         }
 
         if (IsDiagonal(direction) && nearbyRail != null)
         {
-            TrickOntoRail(nearbyRail, direction);
+            if (CanEnterRailFromKicker(nearbyRail))
+            {
+                TrickOntoRail(nearbyRail, direction);
+            }
+            else
+            {
+                BufferGrindInput(direction, queuedGrindSeconds, true);
+                PerformDirectionalTrick(direction);
+            }
         }
         else if (IsDiagonal(direction))
         {
             GrindRail targetRail = FindTargetRail(direction);
-            if (targetRail != null)
+            if (targetRail != null && CanEnterRailFromKicker(targetRail))
             {
                 TrickOntoRail(targetRail, direction);
             }
@@ -437,16 +463,6 @@ public sealed class PlayerController : MonoBehaviour
                 PerformDirectionalTrick(direction);
             }
         }
-    }
-
-    private void OnSwipeHoldReleased()
-    {
-        if (!grinding)
-        {
-            return;
-        }
-
-        DropFromGrind();
     }
 
     private void OnLaneTargetChanged(int targetLane)
@@ -497,7 +513,6 @@ public sealed class PlayerController : MonoBehaviour
         if (controller.isGrounded || grinding)
         {
             verticalVelocity = jumpVelocity + jumpBonus;
-            MarkManualEntryInput();
         }
     }
 
@@ -520,19 +535,69 @@ public sealed class PlayerController : MonoBehaviour
             return;
         }
 
-        pendingBumpRail = null;
         queuedGrindUntil = 0f;
         queuedGrindDirection = SwipeDirection.UpRight;
         queuedGrindTrickAlreadyPerformed = false;
+        railEntryTarget = null;
+        railEntryUntil = 0f;
+        pendingRailContact = null;
+        pendingRailContactUntil = 0f;
         grinding = true;
         grindTimer = 0f;
         currentRail = rail;
         verticalVelocity = 0f;
+        flipping = false;
+        flipTimer = 0f;
+        if (boardVisual != null)
+        {
+            boardVisual.localRotation = Quaternion.identity;
+        }
         previousLane = lane;
         lane = Mathf.Clamp(Mathf.RoundToInt(rail.transform.position.x / laneWidth), -1, 1);
         steerTargetX = rail.transform.position.x;
-        transform.position = new Vector3(rail.transform.position.x, rail.GrindHeight, transform.position.z);
+        AlignBoardToRail(rail);
         gameManager.AddTrickScore("Grind", 150);
+    }
+
+    private void AlignBoardToRail(GrindRail rail)
+    {
+        Vector3 alignedPosition = transform.position;
+        alignedPosition.x = rail.transform.position.x;
+
+        if (boardVisual != null && boardVisual.TryGetComponent(out Renderer boardRenderer))
+        {
+            float boardBottomY = boardRenderer.bounds.min.y;
+            alignedPosition.y += rail.SurfaceHeight - boardBottomY + GrindRideHeightOffset;
+        }
+        else
+        {
+            alignedPosition.y = rail.SurfaceHeight;
+        }
+
+        transform.position = alignedPosition;
+    }
+
+    private void UpdateGrindRide()
+    {
+        if (!grinding)
+        {
+            return;
+        }
+
+        if (currentRail == null || !currentRail.gameObject.activeInHierarchy)
+        {
+            DropFromGrind();
+            return;
+        }
+
+        AlignBoardToRail(currentRail);
+
+        // A rail's trigger is deliberately thin and the board rides above it, so
+        // trigger exit cannot define the grind lifetime. Finish only at the rail end.
+        if (transform.position.z >= currentRail.EndZ)
+        {
+            DropFromGrind();
+        }
     }
 
     private void DropFromGrind()
@@ -566,7 +631,6 @@ public sealed class PlayerController : MonoBehaviour
         grindTimer = 0f;
         float jumpBonus = gameManager.Upgrades != null ? gameManager.Upgrades.JumpBonus : 0f;
         verticalVelocity = jumpVelocity + jumpBonus;
-        MarkManualEntryInput();
 
         if (direction == SwipeDirection.Up)
         {
@@ -583,8 +647,9 @@ public sealed class PlayerController : MonoBehaviour
 
     private void StartQueuedGrind(GrindRail rail)
     {
-        if (rail == null)
+        if (rail == null || !CanEnterRailFromKicker(rail))
         {
+            ClipRail();
             return;
         }
 
@@ -595,6 +660,7 @@ public sealed class PlayerController : MonoBehaviour
         }
 
         StartGrind(rail);
+        gameManager.AddTrickScore("Kicker to grind", rail.EntryKickerBonusPoints);
         gameManager.ShowMessage($"{trickName} to grind");
     }
 
@@ -602,6 +668,12 @@ public sealed class PlayerController : MonoBehaviour
     {
         if (rail == null || gameManager.State != RunState.Running)
         {
+            return;
+        }
+
+        if (!CanEnterRailFromKicker(rail))
+        {
+            ClipRail();
             return;
         }
 
@@ -615,6 +687,102 @@ public sealed class PlayerController : MonoBehaviour
         queuedGrindUntil = Time.time + seconds;
         queuedGrindDirection = direction;
         queuedGrindTrickAlreadyPerformed = trickAlreadyPerformed;
+    }
+
+    private void EnterRailKicker(RailEntryKicker kicker)
+    {
+        GrindRail rail = kicker.Rail != null ? kicker.Rail : kicker.GetComponentInParent<GrindRail>();
+        if (rail == null || gameManager.State != RunState.Running || grinding)
+        {
+            return;
+        }
+
+        nearbyRail = rail;
+
+        if (activeRailKicker == kicker)
+        {
+            return;
+        }
+
+        if (!IsHeadOnRail(rail))
+        {
+            ClipRail();
+            return;
+        }
+
+        activeRailKicker = kicker;
+        railEntryTarget = null;
+        railEntryUntil = 0f;
+        pendingRailContact = null;
+        pendingRailContactUntil = 0f;
+        verticalVelocity = 0f;
+        lane = Mathf.Clamp(Mathf.RoundToInt(rail.transform.position.x / laneWidth), -1, 1);
+        steerTargetX = rail.transform.position.x;
+    }
+
+    private void ExitRailKicker(RailEntryKicker kicker)
+    {
+        if (kicker == null || activeRailKicker != kicker)
+        {
+            return;
+        }
+
+        GrindRail rail = kicker.Rail != null ? kicker.Rail : kicker.GetComponentInParent<GrindRail>();
+        activeRailKicker = null;
+        if (rail == null)
+        {
+            return;
+        }
+
+        railEntryTarget = rail;
+        railEntryUntil = Time.time + rail.EntryKickerWindowSeconds;
+        verticalVelocity = Mathf.Max(verticalVelocity, rail.EntryKickerLaunchVelocity);
+        gameManager.ShowMessage("Kicker to rail");
+    }
+
+    private void UpdateRailKickerRide()
+    {
+        if (activeRailKicker == null || grinding)
+        {
+            return;
+        }
+
+        verticalVelocity = 0f;
+        Vector3 alignedPosition = transform.position;
+        if (boardVisual != null && boardVisual.TryGetComponent(out Renderer boardRenderer))
+        {
+            alignedPosition.y += activeRailKicker.SurfaceHeightAt(transform.position) -
+                boardRenderer.bounds.min.y + KickerRideHeightOffset;
+        }
+        else
+        {
+            alignedPosition.y = activeRailKicker.SurfaceHeightAt(transform.position);
+        }
+
+        transform.position = alignedPosition;
+    }
+
+    private bool CanEnterRailFromKicker(GrindRail rail)
+    {
+        return rail != null &&
+            railEntryTarget == rail &&
+            Time.time <= railEntryUntil &&
+            IsHeadOnRail(rail);
+    }
+
+    private void StartRailEntryGrind(GrindRail rail)
+    {
+        if (!CanEnterRailFromKicker(rail))
+        {
+            ClipRail();
+            return;
+        }
+
+        railEntryTarget = null;
+        railEntryUntil = 0f;
+        StartGrind(rail);
+        gameManager.AddTrickScore("Kicker to grind", rail.EntryKickerBonusPoints);
+        gameManager.ShowMessage("Kicker to grind");
     }
 
     private GrindRail FindTargetRail(SwipeDirection direction)
@@ -638,7 +806,7 @@ public sealed class PlayerController : MonoBehaviour
             }
 
             float xDelta = rail.transform.position.x - transform.position.x;
-            if (Mathf.Abs(xDelta) > railSideReach)
+            if (Mathf.Abs(xDelta) > railHeadOnMaxOffset)
             {
                 continue;
             }
@@ -659,25 +827,9 @@ public sealed class PlayerController : MonoBehaviour
         return bestRail;
     }
 
-    private void ProcessPendingRailBump()
+    private void ClipRail()
     {
-        if (pendingBumpRail == null || grinding || gameManager.State != RunState.Running)
-        {
-            return;
-        }
-
-        if (Time.time < pendingRailBumpTime)
-        {
-            return;
-        }
-
-        if (Time.time < railBumpCooldownUntil)
-        {
-            pendingBumpRail = null;
-            return;
-        }
-
-        if (!controller.isGrounded && verticalVelocity > 0.5f)
+        if (Time.time < railBumpCooldownUntil || grinding || gameManager.State != RunState.Running)
         {
             return;
         }
@@ -685,10 +837,60 @@ public sealed class PlayerController : MonoBehaviour
         lane = previousLane;
         steerTargetX = lane * laneWidth;
         verticalVelocity = Mathf.Max(verticalVelocity, 2.5f);
+        backwardVelocity = Mathf.Max(backwardVelocity, manualMissBackForce * 0.65f);
+        sideVelocity = transform.position.x >= 0f ? -manualMissSideForce : manualMissSideForce;
         forwardSpeed = Mathf.Max(baseForwardSpeed * 0.85f, forwardSpeed - 1.25f);
         railBumpCooldownUntil = Time.time + railBumpCooldownSeconds;
-        pendingBumpRail = null;
         gameManager.AddSketchyPressure("RAIL CLIP - SECURITY +1");
+    }
+
+    private void QueueRailContact(GrindRail rail)
+    {
+        if (rail == null || grinding || pendingRailContact == rail)
+        {
+            return;
+        }
+
+        pendingRailContact = rail;
+        pendingRailContactUntil = Time.time + railEntryTriggerGraceSeconds;
+    }
+
+    private void ResolvePendingRailContact()
+    {
+        if (pendingRailContact == null || grinding || Time.time < pendingRailContactUntil)
+        {
+            return;
+        }
+
+        GrindRail rail = pendingRailContact;
+        pendingRailContact = null;
+        pendingRailContactUntil = 0f;
+
+        if (CanEnterRailFromKicker(rail))
+        {
+            StartRailEntryGrind(rail);
+        }
+        else
+        {
+            ClipRail();
+        }
+    }
+
+    private bool IsHeadOnRail(GrindRail rail)
+    {
+        return rail != null && Mathf.Abs(transform.position.x - rail.transform.position.x) <= railHeadOnMaxOffset;
+    }
+
+    private bool IsHeadOnFeature(SkateFeature feature)
+    {
+        if (feature == null)
+        {
+            return false;
+        }
+
+        float halfWidth = Mathf.Abs(feature.transform.lossyScale.x) * 0.5f;
+        float cleanEntryWidth = Mathf.Max(0.45f, halfWidth - manualHeadOnSideMargin);
+        return Mathf.Abs(transform.position.x - feature.transform.position.x) <= cleanEntryWidth;
     }
 
     private void Kickflip()
@@ -728,7 +930,7 @@ public sealed class PlayerController : MonoBehaviour
         flipTimer = 0f;
         flipAxis = axis;
         flipDegrees = degrees;
-        MarkManualEntryInput();
+        ArmManualTrickEntry(trickName);
 
         if (jump)
         {
@@ -860,17 +1062,27 @@ public sealed class PlayerController : MonoBehaviour
             return;
         }
 
-        if (other.TryGetComponent(out GrindRail rail))
+        if (other.TryGetComponent(out RailEntryKicker kicker))
+        {
+            EnterRailKicker(kicker);
+            return;
+        }
+
+        GrindRail rail = other.GetComponentInParent<GrindRail>();
+        if (rail != null)
         {
             nearbyRail = rail;
-            if (Time.time <= queuedGrindUntil)
+            if (Time.time <= queuedGrindUntil && CanEnterRailFromKicker(rail))
             {
                 StartQueuedGrind(rail);
             }
+            else if (CanEnterRailFromKicker(rail))
+            {
+                StartRailEntryGrind(rail);
+            }
             else if (!grinding && gameManager.State == RunState.Running)
             {
-                pendingBumpRail = rail;
-                pendingRailBumpTime = Time.time + railBumpGraceSeconds;
+                QueueRailContact(rail);
             }
         }
 
@@ -880,22 +1092,72 @@ public sealed class PlayerController : MonoBehaviour
         }
     }
 
+    private void OnTriggerStay(Collider other)
+    {
+        if (finalBonusActive || gameManager.State != RunState.Running)
+        {
+            return;
+        }
+
+        if (other.TryGetComponent(out SkateFeature feature) &&
+            feature.FeatureType == SkateFeatureType.ManualPad &&
+            !feature.Used)
+        {
+            ActivateFeature(feature);
+            return;
+        }
+
+        if (other.TryGetComponent(out RailEntryKicker kicker))
+        {
+            EnterRailKicker(kicker);
+            return;
+        }
+
+        GrindRail rail = other.GetComponentInParent<GrindRail>();
+        if (rail != null)
+        {
+            nearbyRail = rail;
+            if (Time.time <= queuedGrindUntil && CanEnterRailFromKicker(rail))
+            {
+                StartQueuedGrind(rail);
+            }
+            else if (CanEnterRailFromKicker(rail))
+            {
+                StartRailEntryGrind(rail);
+            }
+            else if (!grinding)
+            {
+                QueueRailContact(rail);
+            }
+        }
+    }
+
     private void OnTriggerExit(Collider other)
     {
-        if (nearbyRail != null && other.gameObject == nearbyRail.gameObject)
+        if (other.TryGetComponent(out RailEntryKicker kicker))
+        {
+            ExitRailKicker(kicker);
+            return;
+        }
+
+        GrindRail rail = other.GetComponentInParent<GrindRail>();
+
+        if (nearbyRail != null && rail == nearbyRail)
         {
             nearbyRail = null;
         }
 
-        if (currentRail != null && other.gameObject == currentRail.gameObject)
+        if (pendingRailContact != null && rail == pendingRailContact)
         {
-            DropFromGrind();
+            GrindRail missedRail = pendingRailContact;
+            pendingRailContact = null;
+            pendingRailContactUntil = 0f;
+            if (!CanEnterRailFromKicker(missedRail))
+            {
+                ClipRail();
+            }
         }
 
-        if (pendingBumpRail != null && other.gameObject == pendingBumpRail.gameObject)
-        {
-            pendingBumpRail = null;
-        }
     }
 
     private static bool IsDiagonal(SwipeDirection direction)
@@ -950,11 +1212,6 @@ public sealed class PlayerController : MonoBehaviour
                 TrickOutOfGrind(SwipeDirection.DownRight);
             }
 
-            if (Input.GetKeyUp(KeyCode.G))
-            {
-                DropFromGrind();
-            }
-
             return;
         }
 
@@ -970,7 +1227,7 @@ public sealed class PlayerController : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W))
         {
             Jump();
-            MarkManualEntryInput();
+            ArmManualTrickEntry("Ollie");
             gameManager.AddTrickScore("Ollie", 75);
         }
 
@@ -1002,10 +1259,6 @@ public sealed class PlayerController : MonoBehaviour
             }
         }
 
-        if (Input.GetKeyUp(KeyCode.G))
-        {
-            OnSwipeHoldReleased();
-        }
     }
 
     private void UpdateFinalBonus()
@@ -1095,12 +1348,18 @@ public sealed class PlayerController : MonoBehaviour
         }
         else if (feature.FeatureType == SkateFeatureType.ManualPad)
         {
-            if (CanEnterManualPad())
+            if (CanEnterManualPad(feature))
             {
+                string entryName = string.IsNullOrEmpty(manualEntryTrickName) ? "Trick" : manualEntryTrickName;
                 manualing = true;
-                manualTimer = manualPadSeconds;
-                gameManager.AddTrickScore("Manual Pad", feature.BonusPoints);
+                float padTravelSeconds = Mathf.Abs(feature.transform.lossyScale.z) / Mathf.Max(1f, forwardSpeed);
+                manualTimer = Mathf.Max(manualPadSeconds, padTravelSeconds + 0.15f);
+                manualBalance = 0.5f;
+                manualTrickEntryUntil = 0f;
+                manualEntryTrickName = null;
+                gameManager.AddTrickScore($"{entryName} to Manual", feature.BonusPoints + manualTrickEntryBonusPoints);
                 gameManager.RecordFeature();
+                gameManager.ShowMessage($"{entryName} to Manual");
             }
             else
             {
@@ -1113,12 +1372,14 @@ public sealed class PlayerController : MonoBehaviour
         }
     }
 
-    private bool CanEnterManualPad()
+    private bool CanEnterManualPad(SkateFeature feature)
     {
-        return flipping ||
-               !controller.isGrounded ||
-               verticalVelocity > 0.5f ||
-               Time.time - lastManualEntryInputTime <= manualEntryGraceSeconds;
+        return Time.time <= manualTrickEntryUntil && IsHeadOnFeature(feature) && HasManualPadEntryMotion();
+    }
+
+    private bool HasManualPadEntryMotion()
+    {
+        return !controller.isGrounded || verticalVelocity >= manualPadMinEntryVelocity;
     }
 
     private void MissManualPad()
@@ -1136,8 +1397,16 @@ public sealed class PlayerController : MonoBehaviour
         backwardVelocity = Mathf.Max(backwardVelocity, manualMissBackForce);
         sideVelocity = shoveDirection * manualMissSideForce;
         forwardSpeed = Mathf.Max(0f, forwardSpeed - 2.5f);
+        manualTrickEntryUntil = 0f;
+        manualEntryTrickName = null;
         manualMissCooldownUntil = Time.time + manualMissCooldownSeconds;
-        gameManager.AddControlPenalty("MANUAL MISS - RECOVER", 75, 1);
+        gameManager.AddSketchyPressure("MANNY PAD BUMP - SECURITY +1");
+    }
+
+    private void ArmManualTrickEntry(string trickName)
+    {
+        manualTrickEntryUntil = Time.time + manualTrickEntryWindowSeconds;
+        manualEntryTrickName = trickName;
     }
 
     private void HitNegativePickup(string pickupName)
@@ -1154,11 +1423,6 @@ public sealed class PlayerController : MonoBehaviour
         gameManager.AddControlPenalty($"{pickupName.ToUpperInvariant()} - COMBO DOWN", 125, 2);
     }
 
-    private void MarkManualEntryInput()
-    {
-        lastManualEntryInputTime = Time.time;
-    }
-
     private void UpdateManual()
     {
         if (!manualing)
@@ -1167,6 +1431,7 @@ public sealed class PlayerController : MonoBehaviour
         }
 
         manualTimer -= Time.deltaTime;
+        manualBalance = Mathf.PingPong(Time.time * 0.9f, 1f);
         gameManager.AddScore(Mathf.RoundToInt(35f * Time.deltaTime * gameManager.Combo));
 
         if (!flipping && boardVisual != null)

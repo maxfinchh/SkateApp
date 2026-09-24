@@ -5,6 +5,7 @@ public sealed class HUDController : MonoBehaviour
 {
     [SerializeField] private SkateRunnerGameManager gameManager;
     [SerializeField] private GestureInput gestureInput;
+    [SerializeField] private PlayerController playerController;
 
     private Text scoreText;
     private Text currencyText;
@@ -24,12 +25,14 @@ public sealed class HUDController : MonoBehaviour
     private Image screenFlash;
     private Image finalPowerFill;
     private Image finalPowerGlow;
+    private Image manualBalanceMarker;
     private GameObject scorePanel;
     private GameObject currencyPanel;
     private GameObject missionPanel;
     private GameObject eventPanel;
     private GameObject securityPanel;
     private GameObject finalBonusPanel;
+    private GameObject manualBalancePanel;
     private GameObject controlHintPanel;
     private GameObject startPanel;
     private GameObject gameOverPanel;
@@ -44,6 +47,11 @@ public sealed class HUDController : MonoBehaviour
         if (gestureInput == null)
         {
             gestureInput = FindFirstObjectByType<GestureInput>();
+        }
+
+        if (playerController == null)
+        {
+            playerController = FindFirstObjectByType<PlayerController>();
         }
 
         BuildHud();
@@ -84,7 +92,7 @@ public sealed class HUDController : MonoBehaviour
 
         if (gestureInput != null && gestureInput.Scheme == ControlScheme.PushAndFlick)
         {
-            controlHintText.text = "HOLD TO PUSH\nDRAG TO CARVE\nDIAGONAL HOLD NEAR RAIL";
+            controlHintText.text = "HOLD TO PUSH / DRAG TO CARVE\nTRICK HEAD-ON: RAIL\nDOUBLE TAP: MANUAL";
         }
         else
         {
@@ -98,6 +106,15 @@ public sealed class HUDController : MonoBehaviour
             finalPowerFill.fillAmount = gameManager.FinalBonusPower;
             finalPowerGlow.color = new Color(0.2f, 1f, 0.58f, 0.18f + gameManager.FinalBonusPulse * 0.72f);
             UpdatePulse(finalBonusPanel, gameManager.FinalBonusPulse * 1.45f);
+        }
+
+        bool showManualBalance = showGameplayHud && !finalBonus && playerController != null && playerController.IsManualing;
+        manualBalancePanel.SetActive(showManualBalance);
+        if (showManualBalance)
+        {
+            RectTransform markerRect = manualBalanceMarker.GetComponent<RectTransform>();
+            markerRect.anchorMin = new Vector2(playerController.ManualBalance, 0f);
+            markerRect.anchorMax = new Vector2(playerController.ManualBalance, 1f);
         }
 
         startPanel.SetActive(ready);
@@ -214,6 +231,29 @@ public sealed class HUDController : MonoBehaviour
         glowRect.offsetMax = Vector2.zero;
         finalPowerGlow.transform.SetAsFirstSibling();
         finalBonusPanel.SetActive(false);
+
+        manualBalancePanel = CreatePanel(canvas.transform, "Manual Balance Panel", new Color(0.02f, 0.04f, 0.08f, 0.72f));
+        RectTransform manualRect = manualBalancePanel.GetComponent<RectTransform>();
+        manualRect.anchorMin = new Vector2(0.16f, 0.32f);
+        manualRect.anchorMax = new Vector2(0.84f, 0.39f);
+        manualRect.offsetMin = Vector2.zero;
+        manualRect.offsetMax = Vector2.zero;
+
+        Text manualText = CreatePlainText(manualBalancePanel.transform, "Manual Balance Label", TextAnchor.MiddleCenter, 14, FontStyle.Bold);
+        SetAnchors(manualText.gameObject, new Vector2(0f, 0.52f), Vector2.one, new Vector2(8f, 0f), new Vector2(-8f, 0f));
+        manualText.text = "MANUAL BALANCE";
+
+        GameObject manualTrack = CreatePanel(manualBalancePanel.transform, "Manual Balance Track", new Color(1f, 1f, 1f, 0.22f));
+        SetAnchors(manualTrack, new Vector2(0.08f, 0.18f), new Vector2(0.92f, 0.46f), Vector2.zero, Vector2.zero);
+        GameObject manualCenter = CreatePanel(manualTrack.transform, "Manual Balance Sweet Spot", new Color(0.16f, 1f, 0.52f, 0.55f));
+        SetAnchors(manualCenter, new Vector2(0.38f, 0f), new Vector2(0.62f, 1f), Vector2.zero, Vector2.zero);
+        manualBalanceMarker = CreatePanel(manualTrack.transform, "Manual Balance Marker", new Color(1f, 0.88f, 0.16f, 0.96f)).GetComponent<Image>();
+        RectTransform manualMarkerRect = manualBalanceMarker.GetComponent<RectTransform>();
+        manualMarkerRect.anchorMin = new Vector2(0.5f, 0f);
+        manualMarkerRect.anchorMax = new Vector2(0.5f, 1f);
+        manualMarkerRect.sizeDelta = new Vector2(10f, 0f);
+        manualMarkerRect.anchoredPosition = Vector2.zero;
+        manualBalancePanel.SetActive(false);
 
         gameOverPanel = CreatePanel(canvas.transform, "Results Panel", new Color(0.01f, 0.015f, 0.03f, 0.82f));
         RectTransform panelRect = gameOverPanel.GetComponent<RectTransform>();

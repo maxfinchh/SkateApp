@@ -5,11 +5,11 @@
 - Active Unity project: `/Users/maxfinch/Documents/SkateApp/SkateRunnerUnity/SkateRunnerUnity`.
 - Active runtime scripts: `/Users/maxfinch/Documents/SkateApp/SkateRunnerUnity/SkateRunnerUnity/Assets/Scripts/Runtime`.
 - Root planning docs: `/Users/maxfinch/Documents/SkateApp/GAME_DESIGN.md` and `/Users/maxfinch/Documents/SkateApp/TODO.md`.
-- Current default controls are `PushAndFlick`: quick release flicks do tricks; holding briefly starts push/carve.
+- Current default controls are `PushAndFlick`: quick release flicks do tricks; holding briefly starts push/carve; rails use an attached entry kicker; ollies/flips arm manual-pad entry.
 - Latest input values in `GestureInput`: `pushStartHoldSeconds = 0.14`, `pushSwipeGraceSeconds = 0.36`, `pushFlickMaxSeconds = 0.46`, `pushOllieWidthRatio = 0.32`.
 - Current feel target: push should start fast enough to not feel laggy, but kickflip/heelflip should be easy from angled quick flicks.
 - Do not edit the older outer scaffold at `/Users/maxfinch/Documents/SkateApp/SkateRunnerUnity/Assets` unless explicitly requested.
-- Next likely work: phone-test trick recognition and push feel, tune rail/manual interaction timing, then begin basic animation planning before final art.
+- Next likely work: phone-test trick recognition and push feel, turn the manual balance display into an interactive mechanic, then begin basic animation planning before final art.
 
 ## Next Decisions
 
@@ -96,8 +96,29 @@
 - [x] Make ollie a narrow straight-up flick and give kickflip/heelflip wider diagonal input zones.
 - [x] Tighten push-start delay after first test felt too slow.
 - [x] Let held diagonal push gestures queue or snap into rail grinds without firing normal tricks.
+- [x] Add double-tap manual input and require it for manual pads.
+- [x] Make rail side contact immediately count as `RAIL CLIP - SECURITY +1`.
+- [x] Make manual-pad misses count as `MANUAL MISS - SECURITY +1`.
+- [x] Simplify rail entry: only clean head-on trick entry starts an automatic grind.
+- [x] Remove held diagonal grind input from default `PushAndFlick` controls.
+- [x] Make manual pads spawn as long two-lane features with one open edge lane.
+- [x] Add first manual balance bar during manual pads.
 - [x] Rebalance push-flick direction zones so straight ollies/down inputs recover space from kickflip/heelflip.
+- [x] Make every grind rail own an automatic entry kicker with a visible gap and a small rail-height launch.
+- [x] Require the attached kicker for successful rail entry while keeping side/direct rail contact as a security bump.
+- [x] Extend grind rails to 18 units without stretching or moving their attached kickers.
+- [x] Rework manual-pad entry so an ollie or flip into the pad starts a manual and awards entry bonus points.
+- [x] Add a tall invisible manual-pad trigger so low pad geometry reliably detects both valid entries and head-on bumps.
+- [x] Make manual pads 20 units long, reduce their spawn chance to about 5%, and scale manual duration to traversal time.
+- [x] Reserve the complete footprint and exit buffer around rails/manual pads, including pickups, to prevent unfair overlaps.
+- [x] Temporarily remove the teal negative-pickup hazard from the spawn rotation until its purpose is redesigned.
+- [x] Increase the rail kicker run-up gap and align the board underside to the rail's actual top surface during grinds.
+- [x] Increase the kicker run-up gap to 3.25 units and add an explicit vertical grind ride-height correction.
+- [x] Decouple active grinds from thin rail-trigger overlap; lock the board to the rail each frame and end only at the rail's physical endpoint.
+- [x] Make the attached rail kicker a surface-following ride that launches once at its edge instead of repeatedly launching through its trigger.
+- [ ] Allow clean airborne landings onto rails from separate kicker ramps while preserving red-screen penalties for side/low rail impacts.
 - [ ] Phone-test hold-drag controls against swipe-lane controls before locking final controls.
+- [ ] Make manual balance interactive; currently the marker sweeps automatically and cannot cause a balance failure.
 - [ ] Create basic animation plan for push, carve, ollie, board tricks, grinds, crash, and final mega-ramp.
 
 ## Design Tasks
@@ -128,8 +149,11 @@
 - Quick release flick straight up: ollie.
 - Quick release angled up-left/up-right flick: kickflip/heelflip.
 - Quick release down-left/down-right flick: shove-it/360 flip.
-- Hold a diagonal drag while pushing near a rail: flip onto the rail, or queue a short grind-entry buffer.
-- Release hold while grinding or reach rail end: drop from rail with no penalty.
+- Ride over a rail's attached kicker head-on: small launch into an automatic grind.
+- Side contact with a rail: rail clip/security knock.
+- Ollie or flip shortly before landing on a manual pad: enter manual with bonus points.
+- Roll into a manual pad without an ollie/flip, or enter from the side: manny-pad bump/security knock.
+- Reach the rail end: drop from rail automatically with no penalty.
 - Flick up/diagonal while grinding: trick out for bonus points.
 - `HoldDragSteer` fallback mode maps screen thirds to lanes.
 - `SwipeLane` fallback mode keeps the old left/right lane swipes and diagonal trick swipes.

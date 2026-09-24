@@ -3,6 +3,12 @@ using UnityEngine;
 
 public sealed class ObstacleSpawner : MonoBehaviour
 {
+    private const float RailLength = 18f;
+    private const float RailKickerLength = 2.5f;
+    private const float RailKickerGap = 3.25f;
+    private const float RailBarWidth = 0.48f;
+    private const float RailFrontOffsetFromRow = RailKickerLength + RailKickerGap;
+    private const float ManualPadLength = 20f;
     [SerializeField] private Transform player;
     [SerializeField] private float laneWidth = 2.2f;
     [SerializeField] private float spawnAhead = 55f;
@@ -91,7 +97,8 @@ public sealed class ObstacleSpawner : MonoBehaviour
 
         if (z < reservedPhysicalSpawnUntilZ)
         {
-            SpawnRewardOnlyRow(lane, z);
+            // Keep the complete obstacle footprint and its exit buffer clear.
+            // Coins here can hide inside a rail or force an unfair pickup line.
             return;
         }
 
@@ -126,12 +133,15 @@ public sealed class ObstacleSpawner : MonoBehaviour
         }
         else if (pattern == 6)
         {
-            SpawnManualPad(lane, z);
-        }
-        else if (pattern == 7)
-        {
-            SpawnNegativePickup(lane, z);
-            SpawnCoin(-lane, z + 2.2f);
+            if (Random.value < 0.5f)
+            {
+                SpawnManualPad(lane, z);
+            }
+            else
+            {
+                SpawnCoin(lane, z);
+                SpawnCoin(Mathf.Clamp(lane + (lane <= 0 ? 1 : -1), -1, 1), z + 2.5f);
+            }
         }
         else
         {
@@ -178,11 +188,19 @@ public sealed class ObstacleSpawner : MonoBehaviour
     {
         GameObject rail = GetPooledObject("Rail", CreateRailObject);
         rail.name = "Grind Rail";
-        rail.transform.position = new Vector3(lane * laneWidth, 0.75f, z + 5.1f);
+        float railCenterOffset = RailFrontOffsetFromRow + RailLength * 0.5f;
+        rail.transform.position = new Vector3(lane * laneWidth, 0.75f, z + railCenterOffset);
         rail.transform.rotation = Quaternion.identity;
-        rail.transform.localScale = new Vector3(0.48f, 0.2f, 13.8f);
-        ApplyMaterial(rail, railMaterial);
-        ReservePhysicalSpace(z, 13.8f + 5.1f);
+        rail.transform.localScale = Vector3.one;
+        Transform railBody = rail.transform.Find("Rail Body");
+        if (railBody != null)
+        {
+            railBody.localPosition = Vector3.zero;
+            railBody.localScale = new Vector3(RailBarWidth, 0.2f, RailLength);
+        }
+        rail.GetComponent<GrindRail>().ConfigureEntryKicker(4.25f, 0.9f, 180);
+        ApplyMaterialToChildren(rail, railMaterial);
+        ReservePhysicalSpace(z, RailFrontOffsetFromRow + RailLength);
     }
 
     private void SpawnCoin(int lane, float z)
@@ -229,30 +247,26 @@ public sealed class ObstacleSpawner : MonoBehaviour
 
     private void SpawnManualPad(int lane, float z)
     {
+        int side = Random.value < 0.5f ? -1 : 1;
+        int firstLane = side < 0 ? -1 : 0;
+        int secondLane = side < 0 ? 0 : 1;
+        float centerX = side * laneWidth * 0.5f;
         GameObject pad = GetPooledObject("ManualPad", CreateManualPadObject);
         pad.name = "Manual Pad";
-        pad.transform.position = new Vector3(lane * laneWidth, 0.08f, z + 2f);
+        pad.transform.position = new Vector3(centerX, 0.08f, z + ManualPadLength * 0.5f);
         pad.transform.rotation = Quaternion.identity;
-        pad.transform.localScale = new Vector3(1.65f, 0.12f, 6.8f);
+        pad.transform.localScale = new Vector3(laneWidth * 1.86f, 0.12f, ManualPadLength);
         SkateFeature feature = pad.GetComponent<SkateFeature>();
         feature.Configure(SkateFeatureType.ManualPad, 180, 0f);
         feature.ResetUsed();
         ApplyMaterial(pad, markerMaterial != null ? markerMaterial : railMaterial);
 
-        SpawnCoin(lane, z + 1.2f);
-        SpawnCoin(lane, z + 2.8f);
-        SpawnCoin(lane, z + 4.4f);
-        SpawnCoin(lane, z + 6.0f);
-        ReservePhysicalSpace(z, 6.8f + 2f);
-    }
-
-    private void SpawnRewardOnlyRow(int lane, float z)
-    {
-        SpawnCoin(lane, z);
-        if (Random.value > 0.45f)
+        for (int i = 0; i < 10; i++)
         {
-            SpawnCoin(Mathf.Clamp(lane + (lane <= 0 ? 1 : -1), -1, 1), z + 2.4f);
+            SpawnCoin(i % 2 == 0 ? firstLane : secondLane, z + 1.5f + i * 1.8f);
         }
+
+        ReservePhysicalSpace(z, ManualPadLength);
     }
 
     private void ReservePhysicalSpace(float startZ, float featureLength)
@@ -416,9 +430,16 @@ public sealed class ObstacleSpawner : MonoBehaviour
 
     private GameObject CreateRailObject()
     {
-        GameObject rail = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        rail.GetComponent<BoxCollider>().isTrigger = true;
+        GameObject rail = new GameObject("Grind Rail");
         rail.AddComponent<GrindRail>();
+
+        GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        body.name = "Rail Body";
+        body.transform.SetParent(rail.transform);
+        body.transform.localPosition = Vector3.zero;
+        body.transform.localRotation = Quaternion.identity;
+        body.transform.localScale = Vector3.one;
+        body.GetComponent<BoxCollider>().isTrigger = true;
         return rail;
     }
 
@@ -441,7 +462,14 @@ public sealed class ObstacleSpawner : MonoBehaviour
     private GameObject CreateManualPadObject()
     {
         GameObject pad = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        pad.GetComponent<BoxCollider>().isTrigger = true;
+        BoxCollider trigger = pad.GetComponent<BoxCollider>();
+        trigger.isTrigger = true;
+
+        // The pad mesh is intentionally very low. Give only its invisible trigger
+        // enough height to overlap the full skater capsule instead of relying on
+        // a few centimeters of contact at the controller's feet.
+        trigger.center = new Vector3(0f, 8f, 0f);
+        trigger.size = new Vector3(1f, 16f, 1f);
         pad.AddComponent<SkateFeature>();
         return pad;
     }

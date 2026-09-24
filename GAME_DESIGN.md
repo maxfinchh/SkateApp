@@ -6,7 +6,7 @@
 - Main gameplay scripts are in `Assets/Scripts/Runtime` inside that nested Unity project.
 - The older outer `SkateRunnerUnity/Assets` scaffold is not the active Unity project.
 - Current prototype is placeholder primitives, not final art.
-- Default control scheme is `PushAndFlick`: tap/click to start, quick release flicks trigger tricks, holding briefly starts pushing, drag while holding carves across the road, release coasts.
+- Default control scheme is `PushAndFlick`: tap/click to start, quick release flicks trigger tricks, holding briefly starts pushing, drag while holding carves across the road, head-on trick entry starts rails automatically, double tap queues manuals, release coasts.
 - Latest input tuning: push starts after `0.14s`, trick swipes have `0.36s` grace before hold/push dominates, quick flick max is `0.46s`, and ollie/down inputs use a moderate straight zone so kickflip/heelflip do not eat every diagonal.
 - Current highest-priority tuning risk: kickflip/heelflip recognition versus push responsiveness. Test this on phone before locking controls.
 - Current second priority: rail/manual feel, especially trick-to-grind and soft mistake recovery.
@@ -53,7 +53,8 @@ Possible gesture ideas:
 - Left/right swipe: lane shift
 - Down swipe: crouch, manual, or prepare for grind
 - Quick release swipe before the push delay takes over: ollie or board trick
-- Diagonal release swipe near rail: trick into grind through a short input buffer
+- Diagonal release swipe while lined up head-on with a rail: trick into automatic grind
+- Double tap shortly before a manual pad: manual
 - Release hold or reach rail end: drop out of grind
 - Flick up/diagonal during grind: trick out for extra points
 
@@ -153,7 +154,8 @@ First playable version should include:
 - The final mega-ramp awards extra distance for repeated diagonal trick swipes while airborne.
 - Gesture input currently uses the original easier diagonal recognition because the stricter lane-priority version made kickflips and heelflips too hard to trigger.
 - Long-term control direction should keep lane movement reliable while making tricks context-sensitive and easy: normal lane swipes for dodging, diagonal swipes for tricks, queued diagonal-hold for rails, and special feature windows for ramps/stairs.
-- Current control sandbox defaults to `PushAndFlick`: tap to start, hold briefly to push/accelerate, drag while holding to carve responsively across the road, release to stop pushing while briefly preserving speed before slowly coasting down, and quick release flicks for ollies/tricks. Holding no longer fires normal tricks in this mode because holding represents pushing, but a held diagonal drag can queue or snap into a rail grind. The push start has a short `0.14s` delay so fast swipes can resolve as tricks before steering/pushing begins. `HoldDragSteer` and `SwipeLane` remain available as fallback test modes.
+- Current control sandbox defaults to `PushAndFlick`: tap to start, hold briefly to push/accelerate, drag while holding to carve responsively across the road, release to stop pushing while briefly preserving speed before slowly coasting down, and quick release flicks for ollies/tricks. Holding no longer fires normal tricks or grind input in this mode because holding represents pushing. The push start has a short `0.14s` delay so fast swipes can resolve as tricks before steering/pushing begins. `HoldDragSteer` and `SwipeLane` remain available as fallback test modes.
+- Double tap is now the manual-pad input. Manual pads no longer accept generic ollie/trick entry; without a queued double tap, contact is a manual miss/security knock.
 - In `PushAndFlick`, straight ollies and straight down inputs have more room than the last tuning pass, while obvious horizontal swipes stay lane/carve input and diagonal swipes still reach kickflip/heelflip/shove-it/360 flip.
 - The final mega-ramp should borrow the satisfying mobile-runner payoff pattern from games like Twerk Race/Run: visible ramp, exaggerated launch, repeated input for extra reward, and a clear win/reward screen, but with skating tricks instead of copying their theme.
 - The final mega-ramp now targets at least 3 seconds of baseline hangtime, and repeated swipes during the launch add air tricks, vertical lift, forward speed, score, and distance.
@@ -161,13 +163,13 @@ First playable version should include:
 - The run-complete screen now has a short restart lockout so final-ramp spam swipes do not immediately start the next run before the player can read stats.
 - Run-complete results hide the active gameplay HUD and summarize launch distance, air trick count, coins, gold, and mission progress.
 - After the final-ramp landing, the skater and camera are centered for the result moment so the stop state feels intentional.
-- Rail misses are now mistake states instead of instant fails: clipping a rail bumps the skater back toward the previous lane and adds security pressure; two mistakes within the pressure window trigger the chaser/fail flow.
-- Rails now support intentional trick-on entry: diagonal-hold near a rail, from behind, or from an adjacent lane performs the matching board trick and snaps into a grind. Plain lane-swiping into a rail still causes a rail clip/security mistake.
+- Rail misses are now mistake states instead of instant fails: clipping or dragging into the side of a rail bumps the skater back/sideways and adds security pressure immediately; two mistakes within the pressure window trigger the chaser/fail flow.
+- Rails now use simple head-on entry: line up with the rail, do a trick before contact, and the rail automatically starts a grind. Side approaches or contact without the trick buffer cause a rail clip/security mistake.
 - Rails are intentionally oversized in the prototype so the player can learn the trick-on timing before real art narrows the visuals.
 - Diagonal trick flicks now briefly buffer rail entry, so a trick aimed at an upcoming rail can become a grind even if the hold timing is not frame-perfect.
 - Grinding now has two exits: release/reach rail end drops the skater off with no penalty, while flicking up or diagonal during the grind performs a trick out and awards extra points.
 - Long rails and manual pads reserve physical spawn space so other obstacles/features do not appear inside them.
-- Manual pads are long reward features with coin lines. Entering with an ollie/trick starts a manual; rolling onto one flat causes a manual miss/security mistake instead of ending the run.
+- Manual pads are long two-lane reward features with one open edge lane. Double tapping shortly before the pad starts a manual and shows a balance bar; rolling, landing, or swerving onto one without that input causes a manual miss/security mistake instead of ending the run.
 - Manual-pad misses now shove the skater sideways/backward, slow forward speed, and behave like a soft recovery mistake locked out for 15 seconds, so approaching a pad flat or from behind does not trigger the final mega-ramp.
 - First negative pickups are loose gravel, wet paint, sketchy cracks, security cones, and mud patches. They reduce score/combo/control briefly instead of ending the run.
 - Coin pickup, trick, final-air, rail clip, and fail feedback now route through larger event pop text; rail/fail moments also flash the screen.

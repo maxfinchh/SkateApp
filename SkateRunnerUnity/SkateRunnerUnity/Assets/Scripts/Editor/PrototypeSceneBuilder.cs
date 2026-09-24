@@ -86,11 +86,10 @@ public static class PrototypeSceneBuilder
         playerSo.FindProperty("finalTrickCooldownSeconds").floatValue = 0.12f;
         playerSo.FindProperty("minimumFinalAirSeconds").floatValue = 3f;
         playerSo.FindProperty("queuedGrindSeconds").floatValue = 0.45f;
-        playerSo.FindProperty("railBumpGraceSeconds").floatValue = 0.22f;
         playerSo.FindProperty("railBumpCooldownSeconds").floatValue = 0.85f;
         playerSo.FindProperty("railTrickApproachDistance").floatValue = 17f;
         playerSo.FindProperty("railTrickBehindDistance").floatValue = 5f;
-        playerSo.FindProperty("railSideReach").floatValue = 3.8f;
+        playerSo.FindProperty("manualPadMinEntryVelocity").floatValue = 1.2f;
         playerSo.FindProperty("manualMissCooldownSeconds").floatValue = 15f;
         playerSo.FindProperty("negativePickupCooldownSeconds").floatValue = 0.75f;
         playerSo.ApplyModifiedPropertiesWithoutUndo();

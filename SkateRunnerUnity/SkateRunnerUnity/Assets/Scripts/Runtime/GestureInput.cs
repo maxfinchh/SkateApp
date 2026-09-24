@@ -32,6 +32,9 @@ public sealed class GestureInput : MonoBehaviour
     [SerializeField] private float pushFlickMaxSeconds = 0.46f;
     [SerializeField] private float pushSteerScreenSensitivity = 1.65f;
     [SerializeField] private float pushOllieWidthRatio = 0.32f;
+    [SerializeField] private float tapMaxSeconds = 0.22f;
+    [SerializeField] private float tapMaxMovePixels = 34f;
+    [SerializeField] private float doubleTapMaxSeconds = 0.34f;
 
     public event Action<SwipeDirection> Swipe;
     public event Action<SwipeDirection> SwipeHoldStarted;
@@ -39,6 +42,7 @@ public sealed class GestureInput : MonoBehaviour
     public event Action<int> LaneTargetChanged;
     public event Action<float> SteerTargetChanged;
     public event Action<bool> PushChanged;
+    public event Action DoubleTap;
 
     private bool tracking;
     private bool holdStarted;
@@ -50,6 +54,8 @@ public sealed class GestureInput : MonoBehaviour
     private int lastLaneTarget = int.MinValue;
     private bool flickEmittedDuringHold;
     private bool pushActive;
+    private float lastTapTime = -999f;
+    private Vector2 lastTapPosition;
     private SwipeDirection heldDirection;
 
     public ControlScheme Scheme => controlScheme;
@@ -163,6 +169,7 @@ public sealed class GestureInput : MonoBehaviour
             }
 
             EndPushAndFlick(delta);
+            RecordTapIfEligible(delta);
             tracking = false;
             holdStarted = false;
             pushActive = false;
@@ -190,6 +197,27 @@ public sealed class GestureInput : MonoBehaviour
         holdStarted = false;
     }
 
+    private void RecordTapIfEligible(Vector2 delta)
+    {
+        float touchSeconds = Time.unscaledTime - startTime;
+        if (touchSeconds > tapMaxSeconds || delta.magnitude > tapMaxMovePixels)
+        {
+            return;
+        }
+
+        bool isDoubleTap = Time.unscaledTime - lastTapTime <= doubleTapMaxSeconds &&
+                           Vector2.Distance(latestPosition, lastTapPosition) <= tapMaxMovePixels * 2.2f;
+
+        lastTapTime = Time.unscaledTime;
+        lastTapPosition = latestPosition;
+
+        if (isDoubleTap)
+        {
+            lastTapTime = -999f;
+            DoubleTap?.Invoke();
+        }
+    }
+
     private void MovePushAndFlick(Vector2 screenPosition)
     {
         if (!pushActive)
@@ -209,27 +237,7 @@ public sealed class GestureInput : MonoBehaviour
             PushChanged?.Invoke(true);
         }
 
-        EmitPushRailIntentIfReady(screenPosition);
         EmitSteerTarget(screenPosition);
-    }
-
-    private void EmitPushRailIntentIfReady(Vector2 screenPosition)
-    {
-        Vector2 flickDelta = screenPosition - flickOrigin;
-        if (flickDelta.magnitude < minSwipePixels || Time.unscaledTime - lastFlickTime < holdDragFlickCooldownSeconds)
-        {
-            return;
-        }
-
-        SwipeDirection direction = ResolvePushFlickDirection(flickDelta);
-        if (!IsDiagonal(direction))
-        {
-            return;
-        }
-
-        SwipeHoldStarted?.Invoke(direction);
-        flickOrigin = screenPosition;
-        lastFlickTime = Time.unscaledTime;
     }
 
     private void MoveHoldDrag(Vector2 screenPosition)
